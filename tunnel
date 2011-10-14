@@ -1,10 +1,15 @@
 #!/usr/bin/env python
 
-import sys, random, getpass
+import sys, getpass
+import socket, select
+import SocketServer
 from paramiko import SSHClient, AutoAddPolicy, Transport 
 from paramiko.resource import ResourceManager
 
 SSH_PORT=22
+
+def verbose(s):
+    print s
 
 def user_machine_port(m):
     u, r = m.split('@')
@@ -130,35 +135,88 @@ class SSHSockClient(SSHClient):
 
         
 def setup_tunnel(remote_machine_list):
-    user, machine, port = user_machine_port(remote_machine_list[0])
-    c = SSHClient()
-    c.load_system_host_keys()
-    c.set_missing_host_key_policy(AutoAddPolicy())
-    c.connect(machine,port=port,username=user)
-    print "Initial connection to %s" % remote_machine_list[0]
-    clients = [c]
+    clients = []
     lport = 9234
-    for m in remote_machine_list[1:]:
+    for m in remote_machine_list:
         lport += 1
         user, machine, port = user_machine_port(m)
-        print "opening channel to %s" % m
-        t = clients[-1].get_transport()
-        ch = t.open_channel('direct-tcpip', 
-                dest_addr=(machine,port), 
-                src_addr=('localhost',lport))
+        if clients:
+            verbose("opening channel to %s" % m)
+            t = clients[-1].get_transport()
+            # I don't think these lport numbers necessarily mean anything
+            ch = t.open_channel('direct-tcpip', 
+                    dest_addr=(machine,port), 
+                    src_addr=('localhost',lport))
+        else:
+            ch = None
 
-        print "starting tunneled connection"
+        verbose("starting tunneled connection")
         c = SSHSockClient()
         c.load_system_host_keys()
         c.set_missing_host_key_policy(AutoAddPolicy())
         c.connect(sock=ch, hostname=machine, username=user, port=port)
-        print "Connected to %s" % m
+        verbose("Connected to %s" % m)
         clients.append(c)
 
-    # Now we need to respond to connections on a local port
+    return clients
 
-    return port, clients
+
+class ForwardServer (SocketServer.ThreadingTCPServer):
+    daemon_threads = True
+    allow_reuse_address = True
+    
+
+class Handler (SocketServer.BaseRequestHandler):
+
+    def handle(self):
+        try:
+            chan = self.ssh_transport.open_channel('direct-tcpip',
+                                                   (self.chain_host, self.chain_port),
+                                                   self.request.getpeername())
+        except Exception, e:
+            verbose('Incoming request to %s:%d failed: %s' % (self.chain_host,
+                                                              self.chain_port,
+                                                              repr(e)))
+            return
+        if chan is None:
+            verbose('Incoming request to %s:%d was rejected by the SSH server.' %
+                    (self.chain_host, self.chain_port))
+            return
+
+        verbose('Connected!  Tunnel open %r -> %r -> %r' % (self.request.getpeername(),
+                                                            chan.getpeername(), (self.chain_host, self.chain_port)))
+        while True:
+            r, w, x = select.select([self.request, chan], [], [])
+            if self.request in r:
+                data = self.request.recv(1024)
+                if len(data) == 0:
+                    break
+                chan.send(data)
+            if chan in r:
+                data = chan.recv(1024)
+                if len(data) == 0:
+                    break
+                self.request.send(data)
+        chan.close()
+        verbose('Tunnel closed from %r' % (self.request.getpeername(),))
+        self.request.close()
+
+
+def forward_tunnel(local_port, remote_host, remote_port, transport):
+    # this is a little convoluted, but lets me configure things for the Handler
+    # object.  (SocketServer doesn't give Handlers any way to access the outer
+    # server normally.)
+    class SubHandler (Handler):
+        chain_host = remote_host
+        chain_port = remote_port
+        ssh_transport = transport
+    ForwardServer(('', local_port), SubHandler).serve_forever()
+
 
 if __name__=='__main__':
-    setup_tunnel(sys.argv[1:])
+    clients = setup_tunnel(sys.argv[2:-1])
+    local_port = int(sys.argv[1])
+    remote_port = int(sys.argv[-1])
+    forward_tunnel(local_port, "localhost", remote_port, clients[-1].get_transport())
+
     
