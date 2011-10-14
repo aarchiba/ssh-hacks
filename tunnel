@@ -14,7 +14,8 @@ from paramiko.resource import ResourceManager
 SSH_PORT=22
 
 def verbose(s):
-    print s
+    if g_verbose:
+        print s
 
 def user_machine_port(m):
     if '@' in m:
@@ -25,7 +26,6 @@ def user_machine_port(m):
         m, p = r.split(':')
     else:
         m, p = r, SSH_PORT
-    print u, m, p
     return u, m, int(p)
 
 class SSHSockClient(SSHClient):
@@ -237,6 +237,7 @@ class SOCKS4aHandler (SocketServer.BaseRequestHandler):
                     verbose('Failed: did not request outgoing connection')
                     return
                 user, rest = data[8:].split(chr(0),1)
+                verbose("User claims to be %s" % repr(user))
                 if ip<256:
                     host, rest = rest.split(chr(0),1)
                 else:
@@ -307,7 +308,9 @@ def socks(port, transport):
 if __name__=='__main__':
     parser = OptionParser(
             usage="%prog [options] machine_1 machine_2 ... machine_n",
-            epilog="Open an SSH connection to each machine_i, tunneled through the connection to machine_(i-1). Forwardings then transfer connections to localhost to connections from machine_n to itself; this way no unencrypted traffic is sent across the network.")
+            epilog="Open an SSH connection to each machine_i, tunneled through the connection to machine_(i-1). Forwardings then transfer connections to localhost to connections from machine_n to itself; this way no unencrypted traffic is sent across the network. SOCKS forwarding allows a SOCKS-aware client to connect to arbitrary machines while apparently coming from machine_n. DNS requests may also be handled by the SOCKS server. Note that all ports opened on the local machine are accessible to any user on the local machine, but to no one else.")
+    parser.add_option("-v", "--verbose", action="store_true", 
+            help="Verbose output.")
     parser.add_option("-D", "--socks", 
             metavar="PORT", type=int,
             help="Act as a SOCKS4a proxy listening on PORT (to localhost only)")
@@ -315,6 +318,9 @@ if __name__=='__main__':
             action="append", metavar="LOCAL:REMOTE",
             help="forward connections from localhost port LOCAL to final host port REMOTE")
     options, args = parser.parse_args(sys.argv[1:])
+
+    global g_verbose
+    g_verbose = options.verbose
 
     if not options.forward:
         raise ValueError("No forwardings specified")
