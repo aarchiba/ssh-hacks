@@ -5,6 +5,7 @@ import socket, select
 import SocketServer
 import threading
 import time
+import struct
 from optparse import OptionParser
 
 from paramiko import SSHClient, AutoAddPolicy, Transport 
@@ -214,6 +215,68 @@ class Handler (SocketServer.BaseRequestHandler):
         verbose('Tunnel closed from %r' % (self.request.getpeername(),))
         self.request.close()
 
+class SOCKS4aHandler (SocketServer.BaseRequestHandler):
+    def handle(self):
+        data = ""
+        while True:
+            r, w, x = select.select([self.request], [], [])
+            if self.request in r:
+                data = self.request.recv(1024)
+                if len(data) == 0:
+                    continue
+                if data[0]!=chr(4):
+                    # not the right version of SOCKS
+                    verbose('Failed: Not a SOCKS4 connection')
+                    return
+                if len(data)<8:
+                    # packet too short!?
+                    verbose('Failed: Packet too short')
+                    return
+                v, request, port, ip = struct.unpack("!BBHI",data[:8])
+                if request!=1:
+                    verbose('Failed: did not request outgoing connection')
+                    return
+                user, rest = data[8:].split(chr(0),1)
+                if ip<256:
+                    host, rest = rest.split(chr(0),1)
+                else:
+                    host = socket.inet_ntoa(data[4:8])
+                data=rest
+                break
+        try:
+            chan = self.ssh_transport.open_channel('direct-tcpip',
+                                                   (host, port),
+                                                   self.request.getpeername())
+        except Exception, e:
+            verbose('Incoming request to %s:%d failed: %s' % (host,
+                                                              port,
+                                                              repr(e)))
+            self.request.send(struct.pack('!BBHI',0,0x5b,0,0))
+            return
+        self.request.send(struct.pack('!BBHI',0,0x5a,0,0))
+
+        verbose('Connected!  Tunnel open %r -> %r -> %r' % 
+                (self.request.getpeername(),
+                 chan.getpeername(), (host, port)))
+    
+        if data:
+            verbose("Dropping trailing characters on SOCKS request: %s" % repr(data))
+        while True:
+            r, w, x = select.select([self.request, chan], [], [])
+            if self.request in r:
+                data = self.request.recv(1024)
+                if len(data) == 0:
+                    break
+                chan.send(data)
+            if chan in r:
+                data = chan.recv(1024)
+                if len(data) == 0:
+                    break
+                self.request.send(data)
+        chan.close()
+        verbose('Tunnel closed from %r' % (self.request.getpeername(),))
+        self.request.close()
+
 
 def forward_tunnel(local_port, remote_host, remote_port, transport):
     # this is a little convoluted, but lets me configure things for the Handler
@@ -223,17 +286,31 @@ def forward_tunnel(local_port, remote_host, remote_port, transport):
         chain_host = remote_host
         chain_port = remote_port
         ssh_transport = transport
-    s = threading.Thread(target=ForwardServer(('', local_port), SubHandler).serve_forever)
+    s = threading.Thread(target=ForwardServer(('localhost', local_port), SubHandler).serve_forever)
     s.setDaemon(True)
     s.start()
     verbose("started forwarding from %d on localhost to %d on remote host" % 
             (local_port, remote_port))
+
+def socks(port, transport):
+    # this is a little convoluted, but lets me configure things for the Handler
+    # object.  (SocketServer doesn't give Handlers any way to access the outer
+    # server normally.)
+    class SOCKSSubHandler (SOCKS4aHandler):
+        ssh_transport = transport
+    s = threading.Thread(target=ForwardServer(('localhost', port), SOCKSSubHandler).serve_forever)
+    s.setDaemon(True)
+    s.start()
+    verbose("started SOCKS4a forwarding from %d on localhost" % port)
 
 
 if __name__=='__main__':
     parser = OptionParser(
             usage="%prog [options] machine_1 machine_2 ... machine_n",
             epilog="Open an SSH connection to each machine_i, tunneled through the connection to machine_(i-1). Forwardings then transfer connections to localhost to connections from machine_n to itself; this way no unencrypted traffic is sent across the network.")
+    parser.add_option("-D", "--socks", 
+            metavar="PORT", type=int,
+            help="Act as a SOCKS4a proxy listening on PORT (to localhost only)")
     parser.add_option("-f", "--forward", 
             action="append", metavar="LOCAL:REMOTE",
             help="forward connections from localhost port LOCAL to final host port REMOTE")
@@ -248,6 +325,8 @@ if __name__=='__main__':
         l, r = int(l), int(r)
         forward_tunnel(l, "localhost", r, clients[-1].get_transport())
 
+    if options.socks:
+        socks(options.socks, clients[-1].get_transport())
     while True:
         time.sleep(1)
 
