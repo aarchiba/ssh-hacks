@@ -152,12 +152,14 @@ def setup_tunnel(remote_machine_list):
 
         verbose("starting tunneled connection")
         c = SSHSockClient()
+        clients.append(c)
         c.load_system_host_keys()
         c.set_missing_host_key_policy(AutoAddPolicy())
-        c.connect(sock=ch, hostname=machine, username=user, port=port)
+        c.connect(sock=ch, hostname=machine, username=user, port=port,
+                compress=len(clients)==len(remote_machine_list))
         verbose("Connected to %s" % m)
-        clients.append(c)
 
+    clients[-1].get_transport().set_keepalive(120)
     return clients
 
 
