@@ -1,0 +1,17 @@
+ssh-hacks
+=========
+
+ssh-hacks is a small collection of scripts to make it easier to work with 
+complex SSH tunneling setups. The utilities it provides are:
+
+tunnel: connect to a machine not visible to the one you're on through an 
+        arbitrary sequence of intermediate machines. This is done using 
+        port forwarding.
+
+waitforagent: wait until a particular private key is stored in the SSH Agent,
+              then exit cleanly. For use in startup scripts that should run
+              as soon as the user enters their SSH passphrase.
+
+ssh-hacks depends on the pure-python package paramiko, which depends on 
+the compiled pycrypto.
+
