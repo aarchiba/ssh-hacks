@@ -18,9 +18,6 @@ def wait_for_agent(keyname):
     while True:
         for k in A.get_keys():
             b = k.get_base64()
-            if b not in keys_base64:
-                print b
-                keys_base64.add(b)
             if b.startswith(keyname):
                 return
         time.sleep(1)
