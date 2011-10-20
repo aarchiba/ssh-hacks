@@ -1,5 +1,9 @@
 #!/usr/bin/env python
 
+# Copyright Anne Archibald 2011
+# based on code from paramiko
+# This code is licensed under the LGPL
+
 import sys, getpass
 import socket, select
 import SocketServer

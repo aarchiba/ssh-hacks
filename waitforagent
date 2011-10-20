@@ -1,5 +1,8 @@
 #!/usr/bin/env python
 
+# Copyright Anne Archibald 2011
+# this code is under the LGPL
+
 import sys
 import time
 from optparse import OptionParser
