@@ -313,6 +313,8 @@ if __name__=='__main__':
             epilog="Open an SSH connection to each machine_i, tunneled through the connection to machine_(i-1). Forwardings then transfer connections to localhost to connections from machine_n to itself; this way no unencrypted traffic is sent across the network. SOCKS forwarding allows a SOCKS-aware client to connect to arbitrary machines while apparently coming from machine_n. DNS requests may also be handled by the SOCKS server. Note that all ports opened on the local machine are accessible to any user on the local machine, but to no one else.")
     parser.add_option("-v", "--verbose", action="store_true", 
             help="Verbose output.")
+    parser.add_option("-T", "--taken", action="store_true", 
+            help="Report success if the local port is already taken.")
     parser.add_option("-D", "--socks", 
             metavar="PORT", type=int,
             help="Act as a SOCKS4a proxy listening on PORT (to localhost only)")
@@ -320,6 +322,7 @@ if __name__=='__main__':
             action="append", metavar="LOCAL:REMOTE",
             help="forward connections from localhost port LOCAL to final host port REMOTE")
     options, args = parser.parse_args(sys.argv[1:])
+    # FIXME: add an option to forward stdin/stdout
 
     global g_verbose
     g_verbose = options.verbose
@@ -331,10 +334,18 @@ if __name__=='__main__':
     for s in options.forward:
         l, r = s.split(":")
         l, r = int(l), int(r)
-        forward_tunnel(l, "localhost", r, clients[-1].get_transport())
+        try:
+            forward_tunnel(l, "localhost", r, clients[-1].get_transport())
+        except socket.error, e:
+            if not (e.errno==98 and options.taken):
+                raise
 
     if options.socks:
-        socks(options.socks, clients[-1].get_transport())
+        try:
+            socks(options.socks, clients[-1].get_transport())
+        except socket.error, e:
+            if not (e.errno==98 and options.taken):
+                raise
     while True:
         time.sleep(1)
 
