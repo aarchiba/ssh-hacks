@@ -335,14 +335,12 @@ if __name__=='__main__':
     global g_verbose
     g_verbose = options.verbose
 
-    if not options.forward:
-        raise ValueError("No forwardings specified")
-
     clients = setup_tunnel(args)
-    for s in options.forward:
-        l, r = s.split(":")
-        l, r = int(l), int(r)
-        forward_tunnel(l, "localhost", r, clients[-1].get_transport())
+    if options.forward:
+        for s in options.forward:
+            l, r = s.split(":")
+            l, r = int(l), int(r)
+            forward_tunnel(l, "localhost", r, clients[-1].get_transport())
 
     if options.socks:
         socks(options.socks, clients[-1].get_transport())
