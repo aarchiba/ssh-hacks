@@ -33,6 +33,12 @@ def user_machine_port(m):
     return u, m, int(p)
 
 class SSHSockClient(SSHClient):
+    """subclass paramiko.client.SSHClient that uses an existing socket-like object
+
+    Our base class (SSHClient) always creates a new socket
+    object. This subclass lets us re-use an existing socket-like
+    object."""
+
     def connect(self, hostname,
             port=SSH_PORT, username=None,
             password=None, pkey=None,
