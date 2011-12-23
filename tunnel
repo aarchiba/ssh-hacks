@@ -12,7 +12,7 @@ import time
 import struct
 from optparse import OptionParser
 
-from paramiko import SSHClient, AutoAddPolicy, Transport 
+from paramiko import SSHClient, AutoAddPolicy, Transport
 from paramiko.resource import ResourceManager
 
 SSH_PORT=22
@@ -33,8 +33,14 @@ def user_machine_port(m):
     return u, m, int(p)
 
 class SSHSockClient(SSHClient):
-    def connect(self, hostname, 
-            port=SSH_PORT, username=None, 
+    """subclass paramiko.client.SSHClient that uses an existing socket-like object
+
+    Our base class (SSHClient) always creates a new socket
+    object. This subclass lets us re-use an existing socket-like
+    object."""
+
+    def connect(self, hostname,
+            port=SSH_PORT, username=None,
             password=None, pkey=None,
             key_filename=None,
             timeout=None,
@@ -43,7 +49,7 @@ class SSHSockClient(SSHClient):
             compress=False,
             sock=None):
         """
-        Connect to a socket connected SSH server and authenticate to the   
+        Connect to a socket connected SSH server and authenticate to the
         server.  The server's host key
         is checked against the system host keys (see L{load_system_host_keys})
         and any local host keys (L{load_host_keys}).  If the server's hostname
@@ -149,7 +155,7 @@ class SSHSockClient(SSHClient):
             key_filenames = key_filename
         self._auth(username, password, pkey, key_filenames, allow_agent, look_for_keys)
 
-        
+
 def setup_tunnel(remote_machine_list):
     clients = []
     for m in remote_machine_list:
@@ -158,8 +164,8 @@ def setup_tunnel(remote_machine_list):
             verbose("opening channel to %s" % m)
             t = clients[-1].get_transport()
             # I don't think these lport numbers necessarily mean anything
-            ch = t.open_channel('direct-tcpip', 
-                    dest_addr=(machine,port), 
+            ch = t.open_channel('direct-tcpip',
+                    dest_addr=(machine,port),
                     src_addr=('localhost',0))
         else:
             ch = None
@@ -169,6 +175,9 @@ def setup_tunnel(remote_machine_list):
         clients.append(c)
         c.load_system_host_keys()
         c.set_missing_host_key_policy(AutoAddPolicy())
+        kwargs=dict(sock=ch, hostname=machine, username=user, port=port,
+                    compress=len(clients)==len(remote_machine_list))
+        verbose("  arguments to connect(): "+str(kwargs))
         c.connect(sock=ch, hostname=machine, username=user, port=port,
                 compress=len(clients)==len(remote_machine_list))
         verbose("Connected to %s" % m)
@@ -180,7 +189,7 @@ def setup_tunnel(remote_machine_list):
 class ForwardServer (SocketServer.ThreadingTCPServer):
     daemon_threads = True
     allow_reuse_address = True
-    
+
 
 class Handler (SocketServer.BaseRequestHandler):
 
@@ -258,10 +267,10 @@ class SOCKS4aHandler (SocketServer.BaseRequestHandler):
             return
         self.request.send(struct.pack('!BBHI',0,0x5a,0,0))
 
-        verbose('Connected!  Tunnel open %r -> %r -> %r' % 
+        verbose('Connected!  Tunnel open %r -> %r -> %r' %
                 (self.request.getpeername(),
                  chan.getpeername(), (host, port)))
-    
+
         if data:
             verbose("Dropping trailing characters on SOCKS request: %s" % repr(data))
         while True:
@@ -292,7 +301,7 @@ def forward_tunnel(local_port, remote_host, remote_port, transport):
     s = threading.Thread(target=ForwardServer(('localhost', local_port), SubHandler).serve_forever)
     s.setDaemon(True)
     s.start()
-    verbose("started forwarding from %d on localhost to %d on remote host" % 
+    verbose("started forwarding from %d on localhost to %d on remote host" %
             (local_port, remote_port))
 
 def socks(port, transport):
@@ -310,15 +319,26 @@ def socks(port, transport):
 if __name__=='__main__':
     parser = OptionParser(
             usage="%prog [options] machine_1 machine_2 ... machine_n",
-            epilog="Open an SSH connection to each machine_i, tunneled through the connection to machine_(i-1). Forwardings then transfer connections to localhost to connections from machine_n to itself; this way no unencrypted traffic is sent across the network. SOCKS forwarding allows a SOCKS-aware client to connect to arbitrary machines while apparently coming from machine_n. DNS requests may also be handled by the SOCKS server. Note that all ports opened on the local machine are accessible to any user on the local machine, but to no one else.")
-    parser.add_option("-v", "--verbose", action="store_true", 
+            epilog=("Open an SSH connection to each machine_i, "
+                    "tunneled through the connection to "
+                    "machine_(i-1). Forwardings then transfer "
+                    "connections to localhost to connections from "
+                    "machine_n to itself; this way no unencrypted "
+                    "traffic is sent across the network. SOCKS "
+                    "forwarding allows a SOCKS-aware client to connect "
+                    "to arbitrary machines while apparently coming from "
+                    "machine_n. DNS requests may also be handled by the "
+                    "SOCKS server. Note that all ports opened on the "
+                    "local machine are accessible to any user on the "
+                    "local machine, but to no one else."))
+    parser.add_option("-v", "--verbose", action="store_true",
             help="Verbose output.")
     parser.add_option("-T", "--taken", action="store_true", 
             help="Report success if the local port is already taken.")
     parser.add_option("-D", "--socks", 
             metavar="PORT", type=int,
             help="Act as a SOCKS4a proxy listening on PORT (to localhost only)")
-    parser.add_option("-f", "--forward", 
+    parser.add_option("-f", "--forward",
             action="append", metavar="LOCAL:REMOTE",
             help="forward connections from localhost port LOCAL to final host port REMOTE")
     options, args = parser.parse_args(sys.argv[1:])
@@ -326,9 +346,6 @@ if __name__=='__main__':
 
     global g_verbose
     g_verbose = options.verbose
-
-    if not options.forward:
-        raise ValueError("No forwardings specified")
 
     clients = setup_tunnel(args)
     for s in options.forward:
